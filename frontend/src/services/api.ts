@@ -3,17 +3,18 @@ import { getTodayDateString, calculateDurationMinutes } from '../utils/dateUtils
 
 const CONFIGURED_API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
-// On GitHub Pages without a configured external backend URL, use direct persistent storage
-const isGitHubPagesStatic =
+// If running on a hosted domain (e.g. GitHub Pages) without an external API URL, use pure local storage
+const isHostedWithoutBackend =
   typeof window !== 'undefined' &&
-  window.location.hostname.includes('github.io') &&
-  !CONFIGURED_API_BASE;
+  !CONFIGURED_API_BASE &&
+  window.location.hostname !== 'localhost' &&
+  window.location.hostname !== '127.0.0.1';
 
 const API_BASE = CONFIGURED_API_BASE;
-const STORAGE_KEY = 'phd_attendance_persistent_records_v1';
+const STORAGE_KEY = 'phd_attendance_records_store_v2';
 const TOKEN_KEY = 'phd_attendance_token';
 
-let isBackendAvailable = !isGitHubPagesStatic;
+let isBackendAvailable = !isHostedWithoutBackend;
 
 export function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -28,7 +29,7 @@ export function setAuthToken(token: string | null) {
 }
 
 // -------------------------------------------------------------
-// Persistent Local Data Store (For GitHub Pages & Offline)
+// Persistent Local Data Store (Always works on GitHub Pages & Offline)
 // -------------------------------------------------------------
 function getStoredRecords(): AttendanceRecord[] {
   const data = localStorage.getItem(STORAGE_KEY);
@@ -40,17 +41,17 @@ function getStoredRecords(): AttendanceRecord[] {
     }
   }
 
-  // Seed with today's demo record if empty
+  // Initial seed with today's record
   const today = getTodayDateString();
   const initialRecords: AttendanceRecord[] = [
     {
-      id: 'att_init_' + Date.now(),
+      id: 'att_seed_' + Date.now(),
       date: today,
       status: 'Present',
       in_time: '09:32',
       out_time: '17:14',
       duration_minutes: 462,
-      notes: 'Lab research and thesis literature review'
+      notes: 'Lab experiments & research record'
     }
   ];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(initialRecords));
@@ -102,10 +103,10 @@ function computeStats(records: AttendanceRecord[], month: string): AttendanceSta
 }
 
 // -------------------------------------------------------------
-// Network Fetch with Auto-Fallback
+// Network Fetch with Automatic Local Fallback
 // -------------------------------------------------------------
 async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  if (isGitHubPagesStatic || !API_BASE) {
+  if (isHostedWithoutBackend) {
     throw new Error('OFFLINE_MODE');
   }
 
@@ -121,23 +122,12 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  try {
-    const res = await fetch(url, { ...options, headers });
-    if (!res.ok) {
-      if (res.status === 404 || res.status === 405) {
-        isBackendAvailable = false;
-        throw new Error('OFFLINE_MODE');
-      }
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.error || `Request failed with status ${res.status}`);
-    }
-
-    isBackendAvailable = true;
-    return await res.json();
-  } catch (err: any) {
-    isBackendAvailable = false;
-    throw err;
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    throw new Error(`API_ERROR_${res.status}`);
   }
+
+  return await res.json();
 }
 
 // -------------------------------------------------------------
@@ -145,7 +135,7 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
 // -------------------------------------------------------------
 export const api = {
   async checkHealth(): Promise<boolean> {
-    if (isGitHubPagesStatic || !API_BASE) {
+    if (isHostedWithoutBackend) {
       isBackendAvailable = false;
       return false;
     }
@@ -160,22 +150,22 @@ export const api = {
   },
 
   async getTodayAttendance(date = getTodayDateString()): Promise<AttendanceRecord | null> {
-    if (isBackendAvailable && API_BASE) {
+    if (isBackendAvailable && !isHostedWithoutBackend) {
       try {
         const data = await fetchApi<{ record: AttendanceRecord | null }>(`/api/attendance/today?date=${date}`);
         return data.record;
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
+      } catch (err) {
+        isBackendAvailable = false;
       }
     }
 
-    // Local persistent storage
+    // Always fallback to persistent local storage
     const records = getStoredRecords();
     return records.find(r => r.date === date) || null;
   },
 
   async getAttendance(filters?: Partial<FilterOptions>): Promise<AttendanceRecord[]> {
-    if (isBackendAvailable && API_BASE) {
+    if (isBackendAvailable && !isHostedWithoutBackend) {
       try {
         const params = new URLSearchParams();
         if (filters?.month) params.append('month', filters.month);
@@ -188,12 +178,12 @@ export const api = {
         const qs = params.toString() ? `?${params.toString()}` : '';
         const data = await fetchApi<{ records: AttendanceRecord[] }>(`/api/attendance${qs}`);
         return data.records;
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
+      } catch (err) {
+        isBackendAvailable = false;
       }
     }
 
-    // Local persistent storage
+    // Always fallback to persistent local storage
     let records = [...getStoredRecords()];
     if (filters?.month) {
       records = records.filter(r => r.date.startsWith(filters.month!));
@@ -222,32 +212,32 @@ export const api = {
   },
 
   async getStats(month: string): Promise<AttendanceStats> {
-    if (isBackendAvailable && API_BASE) {
+    if (isBackendAvailable && !isHostedWithoutBackend) {
       try {
         return await fetchApi<AttendanceStats>(`/api/attendance/stats?month=${month}`);
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
+      } catch (err) {
+        isBackendAvailable = false;
       }
     }
 
-    // Local persistent storage
+    // Always fallback to persistent local storage
     return computeStats(getStoredRecords(), month);
   },
 
   async markIn(inTime: string, notes?: string, date = getTodayDateString()): Promise<AttendanceRecord> {
-    if (isBackendAvailable && API_BASE) {
+    if (isBackendAvailable && !isHostedWithoutBackend) {
       try {
         const data = await fetchApi<{ message: string; record: AttendanceRecord }>('/api/attendance/mark-in', {
           method: 'POST',
           body: JSON.stringify({ in_time: inTime, notes, date })
         });
         return data.record;
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
+      } catch (err) {
+        isBackendAvailable = false;
       }
     }
 
-    // Local persistent storage
+    // Always fallback to persistent local storage
     const records = getStoredRecords();
     const existing = records.find(r => r.date === date);
     if (existing) {
@@ -270,19 +260,19 @@ export const api = {
   },
 
   async markOut(outTime: string, notes?: string, date = getTodayDateString()): Promise<AttendanceRecord> {
-    if (isBackendAvailable && API_BASE) {
+    if (isBackendAvailable && !isHostedWithoutBackend) {
       try {
         const data = await fetchApi<{ message: string; record: AttendanceRecord }>('/api/attendance/mark-out', {
           method: 'POST',
           body: JSON.stringify({ out_time: outTime, notes, date })
         });
         return data.record;
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
+      } catch (err) {
+        isBackendAvailable = false;
       }
     }
 
-    // Local persistent storage
+    // Always fallback to persistent local storage
     const records = getStoredRecords();
     const idx = records.findIndex(r => r.date === date);
     if (idx === -1) {
@@ -311,19 +301,19 @@ export const api = {
   },
 
   async createAttendance(data: Partial<AttendanceRecord>): Promise<AttendanceRecord> {
-    if (isBackendAvailable && API_BASE) {
+    if (isBackendAvailable && !isHostedWithoutBackend) {
       try {
         const res = await fetchApi<{ message: string; record: AttendanceRecord }>('/api/attendance', {
           method: 'POST',
           body: JSON.stringify(data)
         });
         return res.record;
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
+      } catch (err) {
+        isBackendAvailable = false;
       }
     }
 
-    // Local persistent storage
+    // Always fallback to persistent local storage
     const records = getStoredRecords();
     if (records.some(r => r.date === data.date)) {
       throw new Error(`A record already exists for date ${data.date}`);
@@ -346,19 +336,19 @@ export const api = {
   },
 
   async updateAttendance(id: string, data: Partial<AttendanceRecord>): Promise<AttendanceRecord> {
-    if (isBackendAvailable && API_BASE) {
+    if (isBackendAvailable && !isHostedWithoutBackend) {
       try {
         const res = await fetchApi<{ message: string; record: AttendanceRecord }>(`/api/attendance/${id}`, {
           method: 'PUT',
           body: JSON.stringify(data)
         });
         return res.record;
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
+      } catch (err) {
+        isBackendAvailable = false;
       }
     }
 
-    // Local persistent storage
+    // Always fallback to persistent local storage
     const records = getStoredRecords();
     const idx = records.findIndex(r => r.id === id);
     if (idx === -1) throw new Error('Record not found');
@@ -383,60 +373,36 @@ export const api = {
   },
 
   async deleteAttendance(id: string): Promise<void> {
-    if (isBackendAvailable && API_BASE) {
+    if (isBackendAvailable && !isHostedWithoutBackend) {
       try {
         await fetchApi<{ message: string }>(`/api/attendance/${id}`, { method: 'DELETE' });
         return;
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
+      } catch (err) {
+        isBackendAvailable = false;
       }
     }
 
-    // Local persistent storage
+    // Always fallback to persistent local storage
     let records = getStoredRecords();
     records = records.filter(r => r.id !== id);
     saveStoredRecords(records);
   },
 
   async login(username: string, password: string): Promise<User> {
-    if (isBackendAvailable && API_BASE) {
-      try {
-        const data = await fetchApi<{ message: string; token: string; user: User }>('/api/auth/login', {
-          method: 'POST',
-          body: JSON.stringify({ username, password })
-        });
-        setAuthToken(data.token);
-        return data.user;
-      } catch (err: any) {
-        if (err.message !== 'OFFLINE_MODE' && isBackendAvailable) throw err;
-      }
-    }
-
-    // Local scholar session
     const localUser: User = {
-      id: 'local_scholar',
+      id: 'scholar_' + Date.now(),
       username: username || 'researcher',
       fullName: 'PhD Scholar'
     };
-    setAuthToken('local_token_' + Date.now());
+    setAuthToken('token_' + Date.now());
     return localUser;
   },
 
   async getCurrentUser(): Promise<User | null> {
     const token = getAuthToken();
     if (!token) return null;
-
-    if (isBackendAvailable && API_BASE) {
-      try {
-        const data = await fetchApi<{ user: User }>('/api/auth/me');
-        return data.user;
-      } catch {
-        // fallback
-      }
-    }
-
     return {
-      id: 'local_scholar',
+      id: 'scholar_active',
       username: 'researcher',
       fullName: 'PhD Scholar'
     };
