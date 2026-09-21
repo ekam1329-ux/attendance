@@ -1,5 +1,8 @@
 # PhD Attendance Record
 
+> 🌐 **Live Website Link**: [https://ekam1329-ux.github.io/attendance/](https://ekam1329-ux.github.io/attendance/)  
+> 💻 **Local URL**: [http://localhost:5173/](http://localhost:5173/)  
+> 
 > **Scope Disclaimer**: This application is a personal attendance remembrance and record-keeping tool. It is **NOT** connected to any university biometric machine, fingerprint reader, RFID badge reader, or official university tracking system. Actual attendance happens physically at the university; this tool simply allows you to log and remember your timings.
 
 ---
