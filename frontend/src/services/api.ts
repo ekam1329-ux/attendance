@@ -239,11 +239,25 @@ export const api = {
 
     // Always fallback to persistent local storage
     const records = getStoredRecords();
-    const existing = records.find(r => r.date === date);
-    if (existing) {
-      throw new Error(`Attendance for ${date} has already been marked (${existing.status}, In: ${existing.in_time || 'N/A'}). Use Edit to adjust timings.`);
+    const idx = records.findIndex(r => r.date === date);
+
+    if (idx !== -1) {
+      // Update existing record
+      const existing = records[idx];
+      const duration = existing.out_time ? calculateDurationMinutes(inTime, existing.out_time) : 0;
+      const updated: AttendanceRecord = {
+        ...existing,
+        status: 'Present',
+        in_time: inTime,
+        duration_minutes: duration,
+        notes: notes !== undefined && notes !== '' ? notes : existing.notes
+      };
+      records[idx] = updated;
+      saveStoredRecords(records);
+      return updated;
     }
 
+    // Create new record
     const newRecord: AttendanceRecord = {
       id: 'att_' + Date.now(),
       date,
@@ -275,29 +289,41 @@ export const api = {
     // Always fallback to persistent local storage
     const records = getStoredRecords();
     const idx = records.findIndex(r => r.date === date);
-    if (idx === -1) {
-      throw new Error(`Cannot Mark Out: No attendance record found for ${date}. Please click "Mark In" first.`);
+
+    if (idx !== -1) {
+      // Update existing record
+      const existing = records[idx];
+      const inTimeToUse = existing.in_time || '09:00';
+      const duration = calculateDurationMinutes(inTimeToUse, outTime);
+      const updatedRecord: AttendanceRecord = {
+        ...existing,
+        in_time: inTimeToUse,
+        out_time: outTime,
+        duration_minutes: duration,
+        notes: notes !== undefined && notes !== '' ? notes : existing.notes
+      };
+
+      records[idx] = updatedRecord;
+      saveStoredRecords(records);
+      return updatedRecord;
     }
 
-    const existing = records[idx];
-    if (!existing.in_time) {
-      throw new Error(`Cannot Mark Out: No In-Time found for ${date}. Please edit the record first.`);
-    }
-    if (existing.out_time) {
-      throw new Error(`You have already marked out for ${date} at ${existing.out_time}. Use Edit to adjust timings.`);
-    }
-
-    const duration = calculateDurationMinutes(existing.in_time, outTime);
-    const updatedRecord: AttendanceRecord = {
-      ...existing,
+    // If no record exists yet, create one with in_time set to 09:00 or current
+    const defaultInTime = '09:00';
+    const duration = calculateDurationMinutes(defaultInTime, outTime);
+    const newRecord: AttendanceRecord = {
+      id: 'att_' + Date.now(),
+      date,
+      status: 'Present',
+      in_time: defaultInTime,
       out_time: outTime,
       duration_minutes: duration,
-      notes: notes !== undefined ? notes : existing.notes
+      notes: notes || ''
     };
 
-    records[idx] = updatedRecord;
+    records.unshift(newRecord);
     saveStoredRecords(records);
-    return updatedRecord;
+    return newRecord;
   },
 
   async createAttendance(data: Partial<AttendanceRecord>): Promise<AttendanceRecord> {
