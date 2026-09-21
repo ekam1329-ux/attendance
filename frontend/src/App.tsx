@@ -2,17 +2,17 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Calendar as CalendarIcon,
   Table as TableIcon,
-  AlertCircle,
-  Database,
-  CloudOff,
-  Plus
+  Plus,
+  Download,
+  CheckCircle2,
+  Clock,
+  CalendarDays
 } from 'lucide-react';
 import { AttendanceRecord, AttendanceStats, FilterOptions, User } from './types';
-import { api, getBackendStatus } from './services/api';
-import { getTodayDateString } from './utils/dateUtils';
+import { api } from './services/api';
+import { getTodayDateString, getMonthYearDisplay } from './utils/dateUtils';
 import { Navbar } from './components/Navbar';
 import { TodayCard } from './components/TodayCard';
-import { DashboardStats } from './components/DashboardStats';
 import { AttendanceTable } from './components/AttendanceTable';
 import { CalendarView } from './components/CalendarView';
 import { AttendanceModal } from './components/AttendanceModal';
@@ -43,7 +43,6 @@ export const App: React.FC = () => {
   const [todayRecord, setTodayRecord] = useState<AttendanceRecord | null>(null);
   const [stats, setStats] = useState<AttendanceStats | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [isBackendOnline, setIsBackendOnline] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
@@ -88,10 +87,6 @@ export const App: React.FC = () => {
   const loadData = useCallback(async (showRefreshingSpinner = false) => {
     if (showRefreshingSpinner) setIsRefreshing(true);
     try {
-      // Check backend health
-      const isOnline = await api.checkHealth();
-      setIsBackendOnline(isOnline);
-
       // Load today's record
       const today = await api.getTodayAttendance();
       setTodayRecord(today);
@@ -100,7 +95,7 @@ export const App: React.FC = () => {
       const recordList = await api.getAttendance(filters);
       setRecords(recordList);
 
-      // Load stats for current filter month
+      // Load stats
       const currentMonthStr = filters.month || getTodayDateString().slice(0, 7);
       const statData = await api.getStats(currentMonthStr);
       setStats(statData);
@@ -113,7 +108,6 @@ export const App: React.FC = () => {
     }
   }, [filters, addToast]);
 
-  // Initial user check and data load
   useEffect(() => {
     api.getCurrentUser().then(setUser);
     loadData();
@@ -223,40 +217,7 @@ export const App: React.FC = () => {
       />
 
       <main className="main-content">
-        {/* Important Scope Disclaimer & Backend Status Banner */}
-        <aside className="disclaimer-banner" role="note">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-            <AlertCircle size={18} className="disclaimer-icon" />
-            <div>
-              <strong>Personal Record-Keeping Only:</strong> This application is for personal attendance
-              remembrance. It is <strong>NOT</strong> connected to any university biometric machine or
-              fingerprint/RFID system. Actual attendance happens physically at the university.
-            </div>
-          </div>
-
-          <div
-            className={`connection-badge ${isBackendOnline ? 'connected' : 'offline'}`}
-            title={
-              isBackendOnline
-                ? 'Connected to Express & SQLite Database'
-                : 'Offline / Demo Storage Mode'
-            }
-          >
-            {isBackendOnline ? (
-              <>
-                <Database size={13} />
-                <span>API Database Connected</span>
-              </>
-            ) : (
-              <>
-                <CloudOff size={13} />
-                <span>Offline Demo Mode</span>
-              </>
-            )}
-          </div>
-        </aside>
-
-        {/* Prominent Mark Today's Attendance Section */}
+        {/* 1. TOP SECTION: MARK TODAY'S ATTENDANCE WITH DATE AND TIME */}
         <TodayCard
           todayRecord={todayRecord}
           onMarkIn={handleMarkIn}
@@ -265,54 +226,98 @@ export const App: React.FC = () => {
           isLoading={isLoading}
         />
 
-        {/* Statistics & Monthly Summary */}
-        <DashboardStats
-          stats={stats}
-          currentMonthStr={filters.month || getTodayDateString().slice(0, 7)}
-        />
-
-        {/* View Switcher Tabs (Table View / Calendar View) */}
-        <div className="view-tabs">
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === 'table' ? 'active' : ''}`}
-            onClick={() => setActiveTab('table')}
+        {/* 2. COMPACT SUMMARY BAR */}
+        {stats && (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-md)',
+              padding: '0.85rem 1.25rem',
+              marginBottom: '1.75rem',
+              fontSize: '0.875rem'
+            }}
           >
-            <TableIcon size={16} />
-            <span>Attendance Table</span>
-          </button>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '1.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <CheckCircle2 size={16} style={{ color: 'var(--status-present-accent)' }} />
+                <span>
+                  Total Present: <strong style={{ color: 'var(--status-present-accent)' }}>{stats.overall.presentDays}</strong> days
+                </span>
+              </div>
 
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === 'calendar' ? 'active' : ''}`}
-            onClick={() => setActiveTab('calendar')}
-          >
-            <CalendarIcon size={16} />
-            <span>Calendar View</span>
-          </button>
-        </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <CalendarDays size={16} style={{ color: 'var(--primary)' }} />
+                <span>
+                  This Month ({getMonthYearDisplay(filters.month)}): <strong>{stats.currentMonth.present}</strong> present
+                </span>
+              </div>
 
-        {/* Active Tab View */}
-        {activeTab === 'table' ? (
-          <AttendanceTable
-            records={records}
-            filters={filters}
-            onFilterChange={setFilters}
-            onEdit={handleOpenEditModal}
-            onDelete={handlePromptDelete}
-            onAddNew={() => handleOpenAddModal()}
-            onOpenExport={() => setIsExportModalOpen(true)}
-            isLoading={isLoading}
-          />
-        ) : (
-          <CalendarView
-            records={records}
-            currentMonthStr={filters.month || getTodayDateString().slice(0, 7)}
-            onMonthChange={(newMonth) => setFilters({ ...filters, month: newMonth })}
-            onEditRecord={handleOpenEditModal}
-            onAddForDate={(d) => handleOpenAddModal(d)}
-          />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Clock size={16} style={{ color: 'var(--text-secondary)' }} />
+                <span>
+                  Avg Daily Hours: <strong>{stats.overall.avgDurationFormatted || '0h 0m'}</strong>
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Tab switcher for View */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+              <button
+                type="button"
+                className={`tab-btn ${activeTab === 'table' ? 'active' : ''}`}
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                onClick={() => setActiveTab('table')}
+              >
+                <TableIcon size={14} />
+                <span>Table</span>
+              </button>
+
+              <button
+                type="button"
+                className={`tab-btn ${activeTab === 'calendar' ? 'active' : ''}`}
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                onClick={() => setActiveTab('calendar')}
+              >
+                <CalendarIcon size={14} />
+                <span>Calendar</span>
+              </button>
+            </div>
+          </div>
         )}
+
+        {/* 3. SECTION DIRECTLY BELOW: ATTENDANCE HISTORY */}
+        <div style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Attendance History</h2>
+          </div>
+
+          {activeTab === 'table' ? (
+            <AttendanceTable
+              records={records}
+              filters={filters}
+              onFilterChange={setFilters}
+              onEdit={handleOpenEditModal}
+              onDelete={handlePromptDelete}
+              onAddNew={() => handleOpenAddModal()}
+              onOpenExport={() => setIsExportModalOpen(true)}
+              isLoading={isLoading}
+            />
+          ) : (
+            <CalendarView
+              records={records}
+              currentMonthStr={filters.month || getTodayDateString().slice(0, 7)}
+              onMonthChange={(newMonth) => setFilters({ ...filters, month: newMonth })}
+              onEditRecord={handleOpenEditModal}
+              onAddForDate={(d) => handleOpenAddModal(d)}
+            />
+          )}
+        </div>
       </main>
 
       {/* Footer */}
@@ -320,9 +325,6 @@ export const App: React.FC = () => {
         <div style={{ maxWidth: '1280px', margin: '0 auto' }}>
           <div>
             <strong>PhD Attendance Record</strong> &bull; Personal Attendance Remembrance System
-          </div>
-          <div style={{ marginTop: '0.25rem', color: 'var(--text-muted)' }}>
-            Designed for PhD Researchers &bull; Decoupled from University Biometrics &bull; Manual Data Entry
           </div>
         </div>
       </footer>
@@ -360,7 +362,7 @@ export const App: React.FC = () => {
         onLogin={handleLogin}
       />
 
-      {/* Toast Notifications Container */}
+      {/* Toast Notifications */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
