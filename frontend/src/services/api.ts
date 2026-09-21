@@ -11,7 +11,7 @@ const isHostedWithoutBackend =
   window.location.hostname !== '127.0.0.1';
 
 const API_BASE = CONFIGURED_API_BASE;
-const STORAGE_KEY = 'phd_attendance_records_store_v2';
+const STORAGE_KEY = 'phd_attendance_records_store_v3';
 const TOKEN_KEY = 'phd_attendance_token';
 
 let isBackendAvailable = !isHostedWithoutBackend;
@@ -41,17 +41,34 @@ function getStoredRecords(): AttendanceRecord[] {
     }
   }
 
-  // Initial seed with today's record
-  const today = getTodayDateString();
+  // Initial past history records (NOT today - today must be marked manually by user)
   const initialRecords: AttendanceRecord[] = [
     {
-      id: 'att_seed_' + Date.now(),
-      date: today,
+      id: 'att_past_1',
+      date: '2026-09-18',
       status: 'Present',
-      in_time: '09:32',
-      out_time: '17:14',
-      duration_minutes: 462,
-      notes: 'Lab experiments & research record'
+      in_time: '09:15',
+      out_time: '17:45',
+      duration_minutes: 510,
+      notes: 'Supervisor meeting and simulation runs'
+    },
+    {
+      id: 'att_past_2',
+      date: '2026-09-17',
+      status: 'Present',
+      in_time: '09:30',
+      out_time: '17:00',
+      duration_minutes: 450,
+      notes: 'Literature survey on thesis chapter 2'
+    },
+    {
+      id: 'att_past_3',
+      date: '2026-09-16',
+      status: 'Leave',
+      in_time: null,
+      out_time: null,
+      duration_minutes: 0,
+      notes: 'University research conference'
     }
   ];
   localStorage.setItem(STORAGE_KEY, JSON.stringify(initialRecords));
